@@ -41,8 +41,17 @@ import org.apache.lucene.util.InfoStream;
  */
 public final class HnswGraphBuilder<T> {
 
+  /** Default number of maximum connections per node */
+  public static final int DEFAULT_MAX_CONN = 16;
+
+  /**
+   * Default number of the size of the queue maintained while searching during a graph construction.
+   */
+  public static final int DEFAULT_BEAM_WIDTH = 100;
+
   /** Default random seed for level generation * */
   private static final long DEFAULT_RAND_SEED = 42;
+
   /** A name for the HNSW component for the info-stream * */
   public static final String HNSW_COMPONENT = "HNSW";
 
@@ -59,6 +68,8 @@ public final class HnswGraphBuilder<T> {
   private final RandomAccessVectorValues<T> vectors;
   private final SplittableRandom random;
   private final HnswGraphSearcher<T> graphSearcher;
+  private final NeighborQueue entryCandidates; // for upper levels of graph search
+  private final NeighborQueue beamCandidates; // for levels of graph where we add the node
 
   final OnHeapHnswGraph hnsw;
 
@@ -141,6 +152,8 @@ public final class HnswGraphBuilder<T> {
             new FixedBitSet(this.vectors.size()));
     // in scratch we store candidates in reverse order: worse candidates are first
     scratch = new NeighborArray(Math.max(beamWidth, M + 1), false);
+    entryCandidates = new NeighborQueue(1, false);
+    beamCandidates = new NeighborQueue(beamWidth, false);
     this.initializedNodes = new HashSet<>();
   }
 
@@ -251,7 +264,6 @@ public final class HnswGraphBuilder<T> {
 
   /** Inserts a doc with vector value to the graph */
   public void addGraphNode(int node, T value) throws IOException {
-    NeighborQueue candidates;
     final int nodeLevel = getRandomGraphLevel(ml, random);
     int curMaxLevel = hnsw.numLevels() - 1;
 
@@ -270,13 +282,19 @@ public final class HnswGraphBuilder<T> {
     }
 
     // for levels > nodeLevel search with topk = 1
+    NeighborQueue candidates = entryCandidates;
     for (int level = curMaxLevel; level > nodeLevel; level--) {
-      candidates = graphSearcher.searchLevel(value, 1, level, eps, vectors, hnsw);
+      candidates.clear();
+      graphSearcher.searchLevel(
+          candidates, value, 1, level, eps, vectors, hnsw, null, Integer.MAX_VALUE);
       eps = new int[] {candidates.pop()};
     }
     // for levels <= nodeLevel search with topk = beamWidth, and add connections
+    candidates = beamCandidates;
     for (int level = Math.min(nodeLevel, curMaxLevel); level >= 0; level--) {
-      candidates = graphSearcher.searchLevel(value, beamWidth, level, eps, vectors, hnsw);
+      candidates.clear();
+      graphSearcher.searchLevel(
+          candidates, value, beamWidth, level, eps, vectors, hnsw, null, Integer.MAX_VALUE);
       eps = candidates.nodes();
       hnsw.addNode(level, node);
       addDiverseNeighbors(level, node, candidates);

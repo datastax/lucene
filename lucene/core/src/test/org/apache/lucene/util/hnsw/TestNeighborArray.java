@@ -27,47 +27,47 @@ public class TestNeighborArray extends LuceneTestCase {
     neighbors.add(1, 0.8f);
 
     AssertionError ex = expectThrows(AssertionError.class, () -> neighbors.add(2, 0.9f));
-    assertEquals("Nodes are added in the incorrect order!", ex.getMessage());
+    assert ex.getMessage().startsWith("Nodes are added in the incorrect order!") : ex.getMessage();
 
     neighbors.insertSorted(3, 0.9f);
     assertScoresEqual(new float[] {1, 0.9f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 3, 1}, neighbors);
+    assertNodesEqual(new int[] {0, 3, 1}, neighbors);
 
     neighbors.insertSorted(4, 1f);
     assertScoresEqual(new float[] {1, 1, 0.9f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 4, 3, 1}, neighbors);
+    assertNodesEqual(new int[] {0, 4, 3, 1}, neighbors);
 
     neighbors.insertSorted(5, 1.1f);
     assertScoresEqual(new float[] {1.1f, 1, 1, 0.9f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 3, 1}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 3, 1}, neighbors);
 
     neighbors.insertSorted(6, 0.8f);
     assertScoresEqual(new float[] {1.1f, 1, 1, 0.9f, 0.8f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 3, 1, 6}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 3, 1, 6}, neighbors);
 
     neighbors.insertSorted(7, 0.8f);
     assertScoresEqual(new float[] {1.1f, 1, 1, 0.9f, 0.8f, 0.8f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 3, 1, 6, 7}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 3, 1, 6, 7}, neighbors);
 
     neighbors.removeIndex(2);
     assertScoresEqual(new float[] {1.1f, 1, 0.9f, 0.8f, 0.8f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 3, 1, 6, 7}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 3, 1, 6, 7}, neighbors);
 
     neighbors.removeIndex(0);
     assertScoresEqual(new float[] {1, 0.9f, 0.8f, 0.8f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 3, 1, 6, 7}, neighbors);
+    assertNodesEqual(new int[] {0, 3, 1, 6, 7}, neighbors);
 
     neighbors.removeIndex(4);
     assertScoresEqual(new float[] {1, 0.9f, 0.8f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 3, 1, 6}, neighbors);
+    assertNodesEqual(new int[] {0, 3, 1, 6}, neighbors);
 
     neighbors.removeLast();
     assertScoresEqual(new float[] {1, 0.9f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 3, 1}, neighbors);
+    assertNodesEqual(new int[] {0, 3, 1}, neighbors);
 
     neighbors.insertSorted(8, 0.9f);
     assertScoresEqual(new float[] {1, 0.9f, 0.9f, 0.8f}, neighbors);
-    asserNodesEqual(new int[] {0, 3, 8, 1}, neighbors);
+    assertNodesEqual(new int[] {0, 3, 8, 1}, neighbors);
   }
 
   public void testScoresAscOrder() {
@@ -76,47 +76,47 @@ public class TestNeighborArray extends LuceneTestCase {
     neighbors.add(1, 0.3f);
 
     AssertionError ex = expectThrows(AssertionError.class, () -> neighbors.add(2, 0.15f));
-    assertEquals("Nodes are added in the incorrect order!", ex.getMessage());
+    assert ex.getMessage().startsWith("Nodes are added in the incorrect order!") : ex.getMessage();
 
     neighbors.insertSorted(3, 0.3f);
     assertScoresEqual(new float[] {0.1f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {0, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {0, 1, 3}, neighbors);
 
     neighbors.insertSorted(4, 0.2f);
     assertScoresEqual(new float[] {0.1f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {0, 4, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {0, 4, 1, 3}, neighbors);
 
     neighbors.insertSorted(5, 0.05f);
     assertScoresEqual(new float[] {0.05f, 0.1f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 1, 3}, neighbors);
 
     neighbors.insertSorted(6, 0.2f);
     assertScoresEqual(new float[] {0.05f, 0.1f, 0.2f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 6, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 6, 1, 3}, neighbors);
 
     neighbors.insertSorted(7, 0.2f);
     assertScoresEqual(new float[] {0.05f, 0.1f, 0.2f, 0.2f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 4, 6, 7, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 4, 6, 7, 1, 3}, neighbors);
 
     neighbors.removeIndex(2);
     assertScoresEqual(new float[] {0.05f, 0.1f, 0.2f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {5, 0, 6, 7, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {5, 0, 6, 7, 1, 3}, neighbors);
 
     neighbors.removeIndex(0);
     assertScoresEqual(new float[] {0.1f, 0.2f, 0.2f, 0.3f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {0, 6, 7, 1, 3}, neighbors);
+    assertNodesEqual(new int[] {0, 6, 7, 1, 3}, neighbors);
 
     neighbors.removeIndex(4);
     assertScoresEqual(new float[] {0.1f, 0.2f, 0.2f, 0.3f}, neighbors);
-    asserNodesEqual(new int[] {0, 6, 7, 1}, neighbors);
+    assertNodesEqual(new int[] {0, 6, 7, 1}, neighbors);
 
     neighbors.removeLast();
     assertScoresEqual(new float[] {0.1f, 0.2f, 0.2f}, neighbors);
-    asserNodesEqual(new int[] {0, 6, 7}, neighbors);
+    assertNodesEqual(new int[] {0, 6, 7}, neighbors);
 
     neighbors.insertSorted(8, 0.01f);
     assertScoresEqual(new float[] {0.01f, 0.1f, 0.2f, 0.2f}, neighbors);
-    asserNodesEqual(new int[] {8, 0, 6, 7}, neighbors);
+    assertNodesEqual(new int[] {8, 0, 6, 7}, neighbors);
   }
 
   private void assertScoresEqual(float[] scores, NeighborArray neighbors) {
@@ -125,7 +125,7 @@ public class TestNeighborArray extends LuceneTestCase {
     }
   }
 
-  private void asserNodesEqual(int[] nodes, NeighborArray neighbors) {
+  private void assertNodesEqual(int[] nodes, NeighborArray neighbors) {
     for (int i = 0; i < nodes.length; i++) {
       assertEquals(nodes[i], neighbors.node[i]);
     }
