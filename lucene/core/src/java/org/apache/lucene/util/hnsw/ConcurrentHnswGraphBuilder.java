@@ -61,7 +61,6 @@ public class ConcurrentHnswGraphBuilder<T> {
   public static final String HNSW_COMPONENT = "HNSW";
 
   private final int beamWidth;
-  private final double ml;
   private final ExplicitThreadLocal<NeighborArray> naturalScratch;
   private final ExplicitThreadLocal<NeighborArray> concurrentScratch;
 
@@ -81,6 +80,7 @@ public class ConcurrentHnswGraphBuilder<T> {
   // we need two sources of vectors in order to perform diversity check comparisons without
   // colliding
   private final ExplicitThreadLocal<RandomAccessVectorValues<T>> vectorsCopy;
+  private final Supplier<Integer> levelSupplier;
 
   /**
    * Reads all the vectors from vector values, builds a graph connecting them by their dense
@@ -93,6 +93,9 @@ public class ConcurrentHnswGraphBuilder<T> {
    * @param beamWidth the size of the beam search to use when finding nearest neighbors.
    * @param neighborOverflow the ratio of extra neighbors to allow temporarily when inserting a
    *     node. larger values will build more efficiently, but use more memory.
+   * @param alpha how aggressive pruning diverse neighbors should be.  Set alpha > 1.0 to
+   *        allow longer edges.  If alpha > 1.0 then a single level, Vamana-style graph
+   *        will be created instead of HNSW.
    */
   public ConcurrentHnswGraphBuilder(
       RandomAccessVectorValues<T> vectorValues,
@@ -100,7 +103,8 @@ public class ConcurrentHnswGraphBuilder<T> {
       VectorSimilarityFunction similarityFunction,
       int M,
       int beamWidth,
-      float neighborOverflow) {
+      float neighborOverflow,
+      float alpha) {
     this.vectors = createThreadSafeVectors(vectorValues);
     this.vectorsCopy = createThreadSafeVectors(vectorValues);
     this.vectorEncoding = Objects.requireNonNull(vectorEncoding);
@@ -114,7 +118,6 @@ public class ConcurrentHnswGraphBuilder<T> {
     }
     this.beamWidth = beamWidth;
     // normalization factor for level generation; currently not configurable
-    this.ml = M == 1 ? 1 : 1 / Math.log(1.0 * M);
 
     NeighborSimilarity similarity =
         new NeighborSimilarity() {
@@ -147,7 +150,20 @@ public class ConcurrentHnswGraphBuilder<T> {
         };
     this.hnsw =
         new ConcurrentOnHeapHnswGraph(
-            M, (node, m) -> new ConcurrentNeighborSet(node, m, similarity));
+            M, (node, m) -> new ConcurrentNeighborSet(node, m, similarity, alpha));
+    if (alpha > 1.0f) {
+      levelSupplier = () -> 0;
+    } else {
+      double ml = M == 1 ? 1 : 1 / Math.log(1.0 * M);
+      levelSupplier = () -> {
+        double randDouble;
+        do {
+          randDouble =
+              ThreadLocalRandom.current().nextDouble(); // avoid 0 value, as log(0) is undefined
+        } while (randDouble == 0.0);
+        return ((int) (-log(randDouble) * ml));
+      };
+    }
 
     this.graphSearcher =
         ExplicitThreadLocal.withInitial(
@@ -173,7 +189,7 @@ public class ConcurrentHnswGraphBuilder<T> {
       VectorSimilarityFunction similarityFunction,
       int M,
       int beamWidth) {
-    this(vectorValues, vectorEncoding, similarityFunction, M, beamWidth, 1.0f);
+    this(vectorValues, vectorEncoding, similarityFunction, M, beamWidth, 1.0f, 1.0f);
   }
 
   private abstract static class ExplicitThreadLocal<U> {
@@ -354,7 +370,7 @@ public class ConcurrentHnswGraphBuilder<T> {
   public long addGraphNode(int node, T value) throws IOException {
     // do this before adding to in-progress, so a concurrent writer checking
     // the in-progress set doesn't have to worry about uninitialized neighbor sets
-    final int nodeLevel = getRandomGraphLevel(ml);
+    final int nodeLevel = levelSupplier.get();
     for (int level = nodeLevel; level >= 0; level--) {
       hnsw.addNode(level, node);
     }
@@ -474,14 +490,5 @@ public class ConcurrentHnswGraphBuilder<T> {
       case BYTE -> similarityFunction.compare((byte[]) v1, (byte[]) v2);
       case FLOAT32 -> similarityFunction.compare((float[]) v1, (float[]) v2);
     };
-  }
-
-  int getRandomGraphLevel(double ml) {
-    double randDouble;
-    do {
-      randDouble =
-          ThreadLocalRandom.current().nextDouble(); // avoid 0 value, as log(0) is undefined
-    } while (randDouble == 0.0);
-    return ((int) (-log(randDouble) * ml));
   }
 }
