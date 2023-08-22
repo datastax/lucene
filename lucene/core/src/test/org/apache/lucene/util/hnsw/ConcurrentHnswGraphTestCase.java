@@ -536,7 +536,7 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
     int numLevels = 0;
     for (int currNode = 0; currNode < nodeCount; currNode++) {
-      int nodeMaxLevel = RandomNumbers.randomIntBetween(random(), 1, maxNumLevels + 1);
+      int nodeMaxLevel = RandomNumbers.randomIntBetween(random(), 1, maxNumLevels - 1);
       numLevels = Math.max(numLevels, nodeMaxLevel);
       for (int currLevel = 0; currLevel < nodeMaxLevel; currLevel++) {
         nodesPerLevel.get(currLevel).add(currNode);
@@ -619,7 +619,7 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
   public void testHnswGraphBuilderInitializationFromGraph_withOffsetZero() throws IOException {
     int totalSize = atLeast(100);
-    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize);
+    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize - 1);
     int docIdOffset = 0;
     int dim = atLeast(10);
     long seed = random().nextLong();
@@ -656,8 +656,8 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
   public void testHnswGraphBuilderInitializationFromGraph_withNonZeroOffset() throws IOException {
     int totalSize = atLeast(100);
-    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize);
-    int docIdOffset = RandomNumbers.randomIntBetween(random(), 1, totalSize - initializerSize + 1);
+    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize - 1);
+    int docIdOffset = RandomNumbers.randomIntBetween(random(), 1, totalSize - initializerSize);
     int dim = atLeast(10);
     long seed = random().nextLong();
 
