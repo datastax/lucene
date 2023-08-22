@@ -23,7 +23,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.TreeMap;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.RamUsageEstimator;
 
@@ -31,7 +30,8 @@ import org.apache.lucene.util.RamUsageEstimator;
  * An {@link HnswGraph} where all nodes and connections are held in memory. This class is used to
  * construct the HNSW graph before it's written to the index.
  *
- * <p>This implementation is NOT threadsafe for insertion or for searching.
+ * <p>This implementation is NOT threadsafe for insertion. It accommodates multiple concurrent
+ * searches given the appropriate scaffolding (which is performed by HnswGraphSeacrher).
  */
 public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
 
@@ -44,14 +44,14 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
   // added to HnswBuilder, and the node values are the ordinals of those vectors.
   // Thus, on all levels, neighbors expressed as the level 0's nodes' ordinals.
   private final List<NeighborArray> graphLevel0;
-  // Represents levels 1-N. Each level is represented with a TreeMap that maps a levels level 0
+  // Represents levels 1-N. Each level is represented with a Map that maps a levels level 0
   // ordinal to its neighbors on that level. All nodes are in level 0, so we do not need to maintain
   // it in this list. However, to avoid changing list indexing, we always will make the first
   // element
   // null.
   private final List<Map<Integer, NeighborArray>> graphUpperLevels;
-  private final float levelLoadFactor =
-      0.75f; // make this explicit since we can't retrieve it once set
+  // this is the default, but make it explicit since we can't retrieve it once set
+  private final float levelLoadFactor = 0.75f;
   private final int nsize;
   private final int nsize0;
 
@@ -93,13 +93,19 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
   }
 
   /**
-   * Add node on the given level. Nodes can be inserted out of order, but it requires that the nodes
-   * preceded by the node inserted out of order are eventually added.
+   * Add node on the given level with an empty set of neighbors.
+   *
+   * <p>Nodes can be inserted out of order, but it requires that the nodes preceded by the node
+   * inserted out of order are eventually added.
+   *
+   * <p>Actually populating the neighbors, and establishing bidirectional links, is the
+   * responsibility of the caller.
+   *
+   * <p>It is also the responsibility of the caller to ensure that each node is only added once.
    *
    * @param level level to add a node on
    * @param node the node to add, represented as an ordinal on the level 0.
    */
-  @Override
   public void addNode(int level, int node) {
     if (entryNode == -1) {
       entryNode = node;
@@ -110,7 +116,9 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
       // and make this node the graph's new entry point
       if (level >= numLevels) {
         for (int i = numLevels; i <= level; i++) {
-          graphUpperLevels.add(new HashMap<>(16, levelLoadFactor));
+          graphUpperLevels.add(
+              new HashMap<>(
+                  16, levelLoadFactor)); // these are the default parameters, made explicit
         }
         numLevels = level + 1;
         entryNode = node;
@@ -180,15 +188,17 @@ public final class OnHeapHnswGraph extends HnswGraph implements Accountable {
     long REF_BYTES = RamUsageEstimator.NUM_BYTES_OBJECT_REF;
 
     long neighborArrayBytes0 =
-        nsize0 * (Integer.BYTES + Float.BYTES)
-            + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER
-            + RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2
-            + Integer.BYTES * 3;
-    long neighborArrayBytes =
-        nsize * (Integer.BYTES + Float.BYTES)
-            + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER
-            + RamUsageEstimator.NUM_BYTES_OBJECT_REF * 2
-            + Integer.BYTES * 3;
+        (long) nsize0 * (Integer.BYTES + Float.BYTES) // int[] and float[] array contents
+            + AH_BYTES * 2 // int[] and float[] array contents
+            + REF_BYTES // the object reference
+            + Integer.BYTES * 2 // size and sortedNodeSize
+            + 1; // boolean scoresDescOrder
+    long neighborArrayBytes = // same as level 0 but with nsize instead of nsize0
+        (long) nsize * (Integer.BYTES + Float.BYTES)
+            + AH_BYTES * 2
+            + REF_BYTES
+            + Integer.BYTES * 2
+            + 1;
     long total = 0;
 
     // a hashmap Node contains an int hash and a Node reference, as well as K and V references.

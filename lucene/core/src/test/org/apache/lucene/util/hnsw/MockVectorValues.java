@@ -22,6 +22,7 @@ import org.apache.lucene.util.ArrayUtil;
 
 class MockVectorValues extends AbstractMockVectorValues<float[]> {
   private final float[] scratch;
+  private final float[] denseScratch;
 
   static MockVectorValues fromValues(float[][] values) {
     int dimension = values[0].length;
@@ -39,6 +40,7 @@ class MockVectorValues extends AbstractMockVectorValues<float[]> {
   MockVectorValues(float[][] values, int dimension, float[][] denseValues, int numVectors) {
     super(values, dimension, denseValues, numVectors);
     this.scratch = new float[dimension];
+    this.denseScratch = new float[dimension];
   }
 
   @Override
@@ -65,6 +67,13 @@ class MockVectorValues extends AbstractMockVectorValues<float[]> {
 
   @Override
   public float[] vectorValue(int targetOrd) {
-    return denseValues[targetOrd];
+    float[] original = super.vectorValue(targetOrd);
+    if (original == null) {
+      return null;
+    }
+    // present a single vector reference to callers like the disk-backed RAVV implmentations,
+    // to catch cases where they are not making a copy
+    System.arraycopy(original, 0, denseScratch, 0, dimension);
+    return denseScratch;
   }
 }

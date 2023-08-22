@@ -45,7 +45,9 @@ import org.apache.lucene.index.FloatVectorValues;
  * </ul>
  *
  * <p>Note: The search method optionally takes a set of "accepted nodes", which can be used to
- * exclude deleted documents. Thread safety of searches depends on the implementation.
+ * exclude deleted documents.
+ *
+ * <p>Thread safety of inserts and searches depends on the implementation.
  */
 public abstract class HnswGraph {
 
@@ -80,7 +82,8 @@ public abstract class HnswGraph {
   public abstract int entryNode() throws IOException;
 
   /**
-   * Get all nodes on a given level as node 0th ordinals
+   * Get all nodes on a given level as node 0th ordinals. The nodes are NOT guaranteed to be
+   * presented in any particular order.
    *
    * @param level level for which to get all nodes
    * @return an iterator over nodes where {@code nextInt} returns a next node on the level
@@ -121,26 +124,9 @@ public abstract class HnswGraph {
       };
 
   /**
-   * Add node on the given level with an empty set of neighbors.
-   *
-   * <p>Nodes can be inserted out of order, but it requires that the nodes preceded by the node
-   * inserted out of order are eventually added.
-   *
-   * <p>Actually populating the neighbors, and establishing bidirectional links, is the
-   * responsibility of the caller.
-   *
-   * <p>It is also the responsibility of the caller to ensure that each node is only added once.
-   *
-   * @param level level to add a node on
-   * @param node the node to add, represented as an ordinal on the level 0.
-   */
-  public void addNode(int level, int node) {
-    throw new UnsupportedOperationException();
-  }
-
-  /**
    * Iterator over the graph nodes on a certain level, Iterator also provides the size – the total
-   * number of nodes to be iterated over.
+   * number of nodes to be iterated over. The nodes are NOT guaranteed to be presented in any
+   * particular order.
    */
   public abstract static class NodesIterator implements PrimitiveIterator.OfInt {
     protected final int size;

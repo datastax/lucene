@@ -34,9 +34,15 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+
+import com.carrotsearch.randomizedtesting.generators.RandomNumbers;
 import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.lucene95.Lucene95Codec;
 import org.apache.lucene.codecs.lucene95.Lucene95HnswVectorsFormat;
@@ -69,6 +75,7 @@ import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.NamedThreadFactory;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.ThreadInterruptedException;
 import org.apache.lucene.util.VectorUtil;
@@ -343,10 +350,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     similarityFunction = VectorSimilarityFunction.DOT_PRODUCT;
     RandomAccessVectorValues<T> vectors = circularVectorValues(nDoc);
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 10, 100);
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
     // run some searches
     NeighborQueue nn;
     switch (getVectorEncoding()) {
@@ -396,16 +402,36 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     }
   }
 
+  static <T> ConcurrentOnHeapHnswGraph buildParallel(
+      ConcurrentHnswGraphBuilder<T> builder, RandomAccessVectorValues<T> vectors)
+      throws IOException {
+    ExecutorService es;
+    int threadCount = Math.max(3, Runtime.getRuntime().availableProcessors());
+    es =
+        Executors.newFixedThreadPool(
+            threadCount, new NamedThreadFactory("Concurrent HNSW builder"));
+
+    Future<ConcurrentOnHeapHnswGraph> f = builder.buildAsync(vectors.copy(), es, threadCount);
+    try {
+      return f.get();
+    } catch (InterruptedException e) {
+      throw new ThreadInterruptedException(e);
+    } catch (ExecutionException e) {
+      throw new RuntimeException(e);
+    } finally {
+      es.shutdown();
+    }
+  }
+
   @SuppressWarnings("unchecked")
   public void testSearchWithAcceptOrds() throws IOException {
     int nDoc = 100;
     RandomAccessVectorValues<T> vectors = circularVectorValues(nDoc);
     similarityFunction = VectorSimilarityFunction.DOT_PRODUCT;
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 16, 100);
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
     // the first 10 docs must not be deleted to ensure the expected recall
     Bits acceptOrds = createRandomAcceptOrds(10, nDoc);
     NeighborQueue nn;
@@ -453,13 +479,12 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     RandomAccessVectorValues<T> vectors = circularVectorValues(nDoc);
     similarityFunction = VectorSimilarityFunction.DOT_PRODUCT;
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 16, 100);
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
     // Only mark a few vectors as accepted
     BitSet acceptOrds = new FixedBitSet(nDoc);
-    for (int i = 0; i < nDoc; i += random().nextInt(5) + 15) {
+    for (int i = 0; i < nDoc; i += RandomNumbers.randomIntBetween(random(), 15, 20)) {
       acceptOrds.set(i);
     }
 
@@ -511,14 +536,29 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
     int numLevels = 0;
     for (int currNode = 0; currNode < nodeCount; currNode++) {
-      int nodeMaxLevel = 1 + random().nextInt(maxNumLevels);
+      int nodeMaxLevel = RandomNumbers.randomIntBetween(random(), 1, maxNumLevels + 1);
       numLevels = Math.max(numLevels, nodeMaxLevel);
       for (int currLevel = 0; currLevel < nodeMaxLevel; currLevel++) {
         nodesPerLevel.get(currLevel).add(currNode);
       }
     }
 
-    ConcurrentOnHeapHnswGraph topDownOrderReversedHnsw = new ConcurrentOnHeapHnswGraph(10);
+    NeighborSimilarity mockSimilarity =
+        new NeighborSimilarity() {
+          @Override
+          public float score(int a, int b) {
+            throw new UnsupportedOperationException();
+          }
+
+          @Override
+          public ScoreFunction scoreProvider(int a) {
+            throw new UnsupportedOperationException();
+          }
+        };
+
+    ConcurrentOnHeapHnswGraph topDownOrderReversedHnsw =
+        new ConcurrentOnHeapHnswGraph(
+            10, (node, m) -> new ConcurrentNeighborSet(node, m, mockSimilarity));
     for (int currLevel = numLevels - 1; currLevel >= 0; currLevel--) {
       List<Integer> currLevelNodes = nodesPerLevel.get(currLevel);
       int currLevelNodesSize = currLevelNodes.size();
@@ -527,7 +567,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
       }
     }
 
-    ConcurrentOnHeapHnswGraph bottomUpOrderReversedHnsw = new ConcurrentOnHeapHnswGraph(10);
+    ConcurrentOnHeapHnswGraph bottomUpOrderReversedHnsw =
+        new ConcurrentOnHeapHnswGraph(
+            10, (node, m) -> new ConcurrentNeighborSet(node, m, mockSimilarity));
     for (int currLevel = 0; currLevel < numLevels; currLevel++) {
       List<Integer> currLevelNodes = nodesPerLevel.get(currLevel);
       int currLevelNodesSize = currLevelNodes.size();
@@ -536,7 +578,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
       }
     }
 
-    ConcurrentOnHeapHnswGraph topDownOrderRandomHnsw = new ConcurrentOnHeapHnswGraph(10);
+    ConcurrentOnHeapHnswGraph topDownOrderRandomHnsw =
+        new ConcurrentOnHeapHnswGraph(
+            10, (node, m) -> new ConcurrentNeighborSet(node, m, mockSimilarity));
     for (int currLevel = numLevels - 1; currLevel >= 0; currLevel--) {
       List<Integer> currLevelNodes = new ArrayList<>(nodesPerLevel.get(currLevel));
       Collections.shuffle(currLevelNodes, random());
@@ -545,7 +589,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
       }
     }
 
-    ConcurrentOnHeapHnswGraph bottomUpExpectedHnsw = new ConcurrentOnHeapHnswGraph(10);
+    ConcurrentOnHeapHnswGraph bottomUpExpectedHnsw =
+        new ConcurrentOnHeapHnswGraph(
+            10, (node, m) -> new ConcurrentNeighborSet(node, m, mockSimilarity));
     for (int currLevel = 0; currLevel < numLevels; currLevel++) {
       for (Integer currNode : nodesPerLevel.get(currLevel)) {
         bottomUpExpectedHnsw.addNode(currLevel, currNode);
@@ -573,7 +619,7 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
   public void testHnswGraphBuilderInitializationFromGraph_withOffsetZero() throws IOException {
     int totalSize = atLeast(100);
-    int initializerSize = 5 + random().nextInt(totalSize);
+    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize);
     int docIdOffset = 0;
     int dim = atLeast(10);
     long seed = random().nextLong();
@@ -610,8 +656,8 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
 
   public void testHnswGraphBuilderInitializationFromGraph_withNonZeroOffset() throws IOException {
     int totalSize = atLeast(100);
-    int initializerSize = 5 + random().nextInt(totalSize / 2);
-    int docIdOffset = 1 + random().nextInt(totalSize - initializerSize + 1);
+    int initializerSize = RandomNumbers.randomIntBetween(random(), 5, totalSize);
+    int docIdOffset = RandomNumbers.randomIntBetween(random(), 1, totalSize - initializerSize + 1);
     int dim = atLeast(10);
     long seed = random().nextLong();
 
@@ -733,10 +779,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     similarityFunction = VectorSimilarityFunction.DOT_PRODUCT;
     RandomAccessVectorValues<T> vectors = circularVectorValues(nDoc);
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 16, 100);
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
 
     int topK = 50;
     int visitedLimit = topK + random().nextInt(5);
@@ -808,25 +853,27 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     VectorEncoding vectorEncoding = getVectorEncoding();
     random().nextLong();
     ConcurrentHnswGraphBuilder<T> builder =
-        new ConcurrentHnswGraphBuilder<>(
-            vectors.copy(), vectorEncoding, similarityFunction, M, M * 2);
-    AtomicLong bytesUsed = new AtomicLong(builder.getGraph().ramBytesUsed());
+        new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, M, M * 2);
+    AtomicLong incrementalEstimate = new AtomicLong(builder.getGraph().ramBytesUsed());
     IntStream.range(0, vectors.size())
         .forEach(
             i -> {
               try {
                 long bytes = builder.addGraphNode(i, vectors);
-                bytesUsed.addAndGet(bytes);
+                incrementalEstimate.addAndGet(bytes);
               } catch (IOException e) {
                 throw new RuntimeException(e);
               }
             });
     ConcurrentOnHeapHnswGraph hnsw = builder.getGraph();
     long estimated = RamUsageEstimator.sizeOfObject(hnsw);
-    long actual = ramUsed(hnsw);
+    long actual =
+        ramUsed(hnsw)
+            - ramUsed(
+                vectors); // hnsw has a reference to vectors via the NeighborSimilarity instance
 
     assertEquals((double) actual, (double) estimated, (double) actual * 0.3);
-    assertEquals((double) bytesUsed.get(), (double) actual, (double) actual * 0.1);
+    assertEquals((double) estimated, (double) incrementalEstimate.get(), (double) estimated * 0.1);
   }
 
   @SuppressWarnings("unchecked")
@@ -845,7 +892,6 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     AbstractMockVectorValues<T> vectors = vectorValues(values);
     // First add nodes until everybody gets a full neighbor list
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 2, 10);
     // node 0 is added by the builder constructor
@@ -902,7 +948,6 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     AbstractMockVectorValues<T> vectors = vectorValues(values);
     // First add nodes until everybody gets a full neighbor list
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 1, 10);
     RandomAccessVectorValues<T> vectorsCopy = vectors.copy();
@@ -935,7 +980,6 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     AbstractMockVectorValues<T> vectors = vectorValues(values);
     // First add nodes until everybody gets a full neighbor list
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextInt();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 1, 10);
     RandomAccessVectorValues<T> vectorsCopy = vectors.copy();
@@ -978,10 +1022,9 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
     AbstractMockVectorValues<T> vectors = vectorValues(size, dim);
     int topK = 5;
     VectorEncoding vectorEncoding = getVectorEncoding();
-    random().nextLong();
     ConcurrentHnswGraphBuilder<T> builder =
         new ConcurrentHnswGraphBuilder<>(vectors, vectorEncoding, similarityFunction, 10, 30);
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
     Bits acceptOrds = random().nextBoolean() ? null : createRandomAcceptOrds(0, size);
 
     int totalMatches = 0;
@@ -1074,7 +1117,7 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
             return super.scoreBetween(v1, v2);
           }
         };
-    ConcurrentOnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    ConcurrentOnHeapHnswGraph hnsw = buildParallel(builder, vectors);
     for (int i = 0; i < vectors.size(); i++) {
       assertTrue(hnsw.getNeighbors(0, i).size() <= 2); // Level 0 gets 2x neighbors
     }
@@ -1228,22 +1271,19 @@ abstract class ConcurrentHnswGraphTestCase<T> extends LuceneTestCase {
         break;
       }
       switch (getVectorEncoding()) {
-        case BYTE:
-          assertArrayEquals(
-              "vectors do not match for doc=" + uDoc,
-              (byte[]) u.vectorValue(),
-              (byte[]) v.vectorValue());
+        case BYTE: assertArrayEquals(
+            "vectors do not match for doc=" + uDoc,
+            (byte[]) u.vectorValue(),
+            (byte[]) v.vectorValue());
           break;
-        case FLOAT32:
-          assertArrayEquals(
-              "vectors do not match for doc=" + uDoc,
-              (float[]) u.vectorValue(),
-              (float[]) v.vectorValue(),
-              1e-4f);
+        case FLOAT32: assertArrayEquals(
+            "vectors do not match for doc=" + uDoc,
+            (float[]) u.vectorValue(),
+            (float[]) v.vectorValue(),
+            1e-4f);
           break;
-        default:
-          throw new IllegalArgumentException(
-              "unknown vector encoding: " + getVectorEncoding());
+        default: throw new IllegalArgumentException(
+            "unknown vector encoding: " + getVectorEncoding());
       }
     }
   }

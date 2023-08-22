@@ -14,23 +14,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.lucene.search;
 
-/**
- * Used by {@link BulkScorer}s that need to pass a {@link Scorable} to {@link
- * LeafCollector#setScorer}.
- */
-final class ScoreAndDoc extends Scorable {
-  float score;
-  int doc = -1;
+package org.apache.lucene.util.hnsw;
 
-  @Override
-  public int docID() {
-    return doc;
-  }
+/** Encapsulates comparing node distances for diversity checks. */
+public interface NeighborSimilarity {
+  /** for one-off comparisons between nodes */
+  float score(int node1, int node2);
 
-  @Override
-  public float score() {
-    return score;
+  /**
+   * For when we're going to compare node1 with multiple other nodes. This allows us to skip loading
+   * node1's vector (potentially from disk) redundantly for each comparison.
+   */
+  ScoreFunction scoreProvider(int node1);
+
+  /** A Function&lt;Integer, Float&gt; without the boxing */
+  @FunctionalInterface
+  interface ScoreFunction {
+    float apply(int node2);
   }
 }

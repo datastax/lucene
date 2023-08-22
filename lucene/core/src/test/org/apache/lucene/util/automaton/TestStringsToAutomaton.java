@@ -28,6 +28,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.tests.util.TestUtil;
 import org.apache.lucene.util.ArrayUtil;
@@ -37,7 +38,7 @@ import org.apache.lucene.util.BytesRefIterator;
 import org.apache.lucene.util.IntsRef;
 import org.apache.lucene.util.fst.Util;
 
-public class TestDaciukMihovAutomatonBuilder extends LuceneTestCase {
+public class TestStringsToAutomaton extends LuceneTestCase {
 
   public void testBasic() throws Exception {
     List<BytesRef> terms = basicTerms();

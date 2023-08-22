@@ -27,6 +27,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicIntegerArray;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.StampedLock;
+import java.util.function.BiFunction;
 import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.RamUsageEstimator;
 
@@ -49,10 +50,13 @@ public final class ConcurrentOnHeapHnswGraph extends HnswGraph implements Accoun
   private final CompletionTracker completions;
 
   // Neighbours' size on upper levels (nsize) and level 0 (nsize0)
-  private final int nsize;
-  private final int nsize0;
+  final int nsize;
+  final int nsize0;
+  private final BiFunction<Integer, Integer, ConcurrentNeighborSet> neighborFactory;
 
-  ConcurrentOnHeapHnswGraph(int M) {
+  ConcurrentOnHeapHnswGraph(
+      int M, BiFunction<Integer, Integer, ConcurrentNeighborSet> neighborFactory) {
+    this.neighborFactory = neighborFactory;
     this.entryPoint =
         new AtomicReference<>(
             new NodeAtLevel(0, -1)); // Entry node should be negative until a node is added
@@ -79,7 +83,20 @@ public final class ConcurrentOnHeapHnswGraph extends HnswGraph implements Accoun
     return levelZero == null ? 0 : levelZero.size(); // all nodes are located on the 0th level
   }
 
-  @Override
+  /**
+   * Add node on the given level with an empty set of neighbors.
+   *
+   * <p>Nodes can be inserted out of order, but it requires that the nodes preceded by the node
+   * inserted out of order are eventually added.
+   *
+   * <p>Actually populating the neighbors, and establishing bidirectional links, is the
+   * responsibility of the caller.
+   *
+   * <p>It is also the responsibility of the caller to ensure that each node is only added once.
+   *
+   * @param level level to add a node on
+   * @param node the node to add, represented as an ordinal on the level 0.
+   */
   public void addNode(int level, int node) {
     if (level >= graphLevels.size()) {
       for (int i = graphLevels.size(); i <= level; i++) {
@@ -87,7 +104,7 @@ public final class ConcurrentOnHeapHnswGraph extends HnswGraph implements Accoun
       }
     }
 
-    graphLevels.get(level).put(node, new ConcurrentNeighborSet(node, connectionsOnLevel(level)));
+    graphLevels.get(level).put(node, neighborFactory.apply(node, connectionsOnLevel(level)));
   }
 
   /** must be called after addNode once neighbors are linked in all levels. */
@@ -102,6 +119,10 @@ public final class ConcurrentOnHeapHnswGraph extends HnswGraph implements Accoun
           }
         });
     completions.markComplete(node);
+  }
+
+  public void updateEntryNode(int node) {
+    entryPoint.set(new NodeAtLevel(0, node));
   }
 
   private int connectionsOnLevel(int level) {
@@ -192,10 +213,10 @@ public final class ConcurrentOnHeapHnswGraph extends HnswGraph implements Accoun
             + Integer.BYTES
             + Integer.BYTES
             + REF_BYTES // NeighborArray
-            + AH_BYTES * 2
+            + AH_BYTES * 2 // NeighborArray internals
             + REF_BYTES * 2
             + Integer.BYTES
-            + 1; // NeighborArray internals
+            + 1;
     return neighborSetBytes + (long) count * (Integer.BYTES + Float.BYTES);
   }
 

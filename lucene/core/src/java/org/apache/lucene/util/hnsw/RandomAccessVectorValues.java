@@ -36,6 +36,10 @@ public interface RandomAccessVectorValues<T> {
   /**
    * Return the vector value indexed at the given ordinal.
    *
+   * <p>For performance, implementations will usually re-use the same object across invocations,
+   * that is, you will get back the same float[] reference (for instance) for every requested
+   * ordinal. If you want to use those values across calls, you should make a copy.
+   *
    * @param targetOrd a valid ordinal, &ge; 0 and &lt; {@link #size()}.
    */
   T vectorValue(int targetOrd) throws IOException;
