@@ -120,7 +120,7 @@ public class HnswGraphSearcher<T> {
       RandomAccessVectorValues<float[]> vectors,
       VectorEncoding vectorEncoding,
       VectorSimilarityFunction similarityFunction,
-      ConcurrentOnHeapHnswGraph graph,
+      HnswGraph graph,
       Bits acceptOrds,
       int visitedLimit)
       throws IOException {
